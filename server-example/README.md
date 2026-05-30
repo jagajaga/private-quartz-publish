@@ -42,22 +42,36 @@ If you re-enable any of those components or emitters, you weaken the privacy pro
 
 ## Quick start
 
-Assuming you have your vault somewhere on the server and want to publish from it:
+Assuming Docker is installed and your vault is on the server already:
 
 ```bash
 git clone https://github.com/jagajaga/private-quartz-publish.git
 cd private-quartz-publish/server-example
+./setup.sh
+```
+
+The wizard prompts for your vault directory and public domain, writes
+`.env`, pulls pre-built images from GHCR, and brings the stack up. Caddy
+inside the compose obtains a Let's Encrypt cert automatically as long
+as port 80 + 443 are reachable from the internet.
+
+**Manual setup** (skip the wizard):
+
+```bash
 cp .env.example .env
-$EDITOR .env                          # set VAULT_DIR
+$EDITOR .env                          # set VAULT_DIR + PUBLISH_DOMAIN
 $EDITOR quartz/quartz.config.ts       # set baseUrl + pageTitle
-$EDITOR caddy/Caddyfile.example       # set domain + path
 cp docker-compose.example.yml docker-compose.yml
 docker compose up -d
 ```
 
-Then wire `caddy/Caddyfile.example` into your existing Caddy config (or
-adapt for nginx / Traefik / etc.), reload, and visit `https://<your-domain>` —
-should be 404 until you publish your first note from Obsidian.
+**Use your own reverse proxy** instead of the bundled Caddy: comment out
+the `caddy:` service in `docker-compose.yml` and adapt `caddy/Caddyfile`
+into your nginx / Traefik / etc. config. Point it at the `publish/site/`
+directory on disk.
+
+After the stack is up, visit `https://<your-domain>` — you should see
+404 until you publish your first note from Obsidian.
 
 ## Where the plugin meets the stager
 

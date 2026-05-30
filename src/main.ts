@@ -15,6 +15,8 @@
 
 import {
   App,
+  Menu,
+  Modal,
   Notice,
   Plugin,
   PluginSettingTab,
@@ -140,22 +142,22 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
 
   // ─── File-menu items ────────────────────────────────────────────────────
 
-  addFileMenu(menu: any, file: TFile) {
+  addFileMenu(menu: Menu, file: TFile) {
     const published = this.isFilePublished(file)
-    menu.addItem((item: any) => {
+    menu.addItem((item) => {
       item
         .setTitle(published ? "Unpublish from web" : "Publish to web")
         .setIcon(published ? "eye-off" : "globe")
         .onClick(() => this.toggleFile(file, published))
     })
     if (published) {
-      menu.addItem((item: any) => {
+      menu.addItem((item) => {
         item
           .setTitle("Copy public URL")
           .setIcon("link")
           .onClick(() => this.copyFileUrl(file, "Copied"))
       })
-      menu.addItem((item: any) => {
+      menu.addItem((item) => {
         item
           .setTitle("Rotate public URL")
           .setIcon("refresh-cw")
@@ -164,29 +166,37 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
     }
   }
 
-  addFolderMenu(menu: any, folder: TFolder) {
+  addFolderMenu(menu: Menu, folder: TFolder) {
     const slug = this.getFolderSlug(folder)
     if (slug) {
-      menu.addItem((item: any) => {
+      menu.addItem((item) => {
         item
           .setTitle("Unpublish folder")
           .setIcon("folder-x")
           .onClick(() => this.unpublishFolder(folder))
       })
-      menu.addItem((item: any) => {
+      menu.addItem((item) => {
         item
           .setTitle("Copy folder URL")
           .setIcon("link")
           .onClick(() => this.copyFolderUrl(folder))
       })
     } else {
-      menu.addItem((item: any) => {
+      menu.addItem((item) => {
         item
           .setTitle("Publish folder")
           .setIcon("folder-plus")
           .onClick(() => this.publishFolder(folder))
       })
     }
+  }
+
+  // Custom modal confirmation matching Obsidian's visual style, replacing
+  // window.confirm() which the plugin review process treats as a code smell.
+  confirm(title: string, body: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      new ConfirmModal(this.app, title, body, resolve).open()
+    })
   }
 
   // ─── Slug + URL helpers ─────────────────────────────────────────────────
@@ -333,11 +343,11 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
       return
     }
     if (this.settings.confirmFolderActions) {
-      const proceed = window.confirm(
-        `Publish folder "${folder.name}" and ALL ${files.length} note(s) inside it ` +
-          `(including subfolders)?\n\n` +
-          `Each note gets its own random URL.\n` +
-          `The folder gets a separate URL that shows a sidebar of all notes.\n` +
+      const proceed = await this.confirm(
+        `Publish folder "${folder.name}"?`,
+        `Publishes all ${files.length} note(s) inside it (including subfolders). ` +
+          `Each note gets its own random URL. ` +
+          `The folder gets a separate URL that shows a sidebar of all notes. ` +
           `Existing folder slug (if any) is reused so shared links stay stable.`,
       )
       if (!proceed) return
@@ -385,9 +395,10 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
   async unpublishFolder(folder: TFolder) {
     const files = this.allMdFilesUnderFolder(folder)
     if (this.settings.confirmFolderActions) {
-      const proceed = window.confirm(
-        `Unpublish folder "${folder.name}" AND all ${files.length} note(s) inside it ` +
-          `(including subfolders)?`,
+      const proceed = await this.confirm(
+        `Unpublish folder "${folder.name}"?`,
+        `Removes the published flag from all ${files.length} note(s) inside it ` +
+          `(including subfolders). The notes themselves are not deleted.`,
       )
       if (!proceed) return
     }
@@ -430,12 +441,13 @@ class QuartzPublishSettingTab extends PluginSettingTab {
     const { containerEl } = this
     containerEl.empty()
 
-    containerEl.createEl("h2", { text: "Private Quartz Publish" })
-
-    const intro = containerEl.createEl("p")
-    intro.appendText(
+    // Intro description shown as a regular paragraph rather than a heading,
+    // following the Obsidian style guide that discourages plugin authors from
+    // injecting their own H2/H3 elements at the top of the settings tab.
+    const intro = containerEl.createEl("p", { cls: "setting-item-description" })
+    intro.setText(
       "This plugin is the Obsidian-side of a self-hosted publishing pipeline. " +
-        "It edits frontmatter; the server-side stager (in your VPS) does the actual mirroring. " +
+        "It edits frontmatter; the server-side stager (running in your VPS) does the actual mirroring. " +
         "See the project README for the server setup.",
     )
 
@@ -501,11 +513,12 @@ class QuartzPublishSettingTab extends PluginSettingTab {
           }),
       )
 
-    containerEl.createEl("h3", { text: "Advanced — frontmatter keys" })
-    containerEl.createEl("p", {
-      text:
+    new Setting(containerEl)
+      .setName("Advanced — frontmatter keys")
+      .setDesc(
         "Change these only if you have an existing convention. The server-side stager must use the same key names.",
-    })
+      )
+      .setHeading()
 
     new Setting(containerEl)
       .setName("Publish flag key")
@@ -538,5 +551,45 @@ class QuartzPublishSettingTab extends PluginSettingTab {
             }
           }),
       )
+  }
+}
+
+// ─── Confirmation modal ───────────────────────────────────────────────────
+
+class ConfirmModal extends Modal {
+  private confirmed = false
+
+  constructor(
+    app: App,
+    private readonly heading: string,
+    private readonly body: string,
+    private readonly onClose_: (result: boolean) => void,
+  ) {
+    super(app)
+  }
+
+  onOpen(): void {
+    const { contentEl } = this
+    contentEl.empty()
+    contentEl.createEl("h3", { text: this.heading })
+    contentEl.createEl("p", { text: this.body })
+
+    const buttonRow = contentEl.createDiv({ cls: "modal-button-container" })
+    const cancel = buttonRow.createEl("button", { text: "Cancel" })
+    cancel.addEventListener("click", () => {
+      this.confirmed = false
+      this.close()
+    })
+    const ok = buttonRow.createEl("button", { text: "Continue", cls: "mod-cta" })
+    ok.addEventListener("click", () => {
+      this.confirmed = true
+      this.close()
+    })
+    ok.focus()
+  }
+
+  onClose(): void {
+    this.contentEl.empty()
+    this.onClose_(this.confirmed)
   }
 }

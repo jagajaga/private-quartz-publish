@@ -1,32 +1,34 @@
-# Reference docker-compose for the server-side stack.
+# All-in-one docker-compose for the server-side stack.
 #
-# Two services that you compose with whatever sync mechanism you use to get
-# your Obsidian vault onto the server:
+# Three services:
 #   - stager: watches the vault, mirrors `publish: true` notes into ./content
-#   - quartz: builds ./content into ./site, which your reverse proxy serves
+#   - quartz: builds ./content into ./site
+#   - caddy:  TLS-terminating reverse proxy with automatic Let's Encrypt
 #
-# Assumes:
-#   - VAULT_DIR is the absolute or relative path to your vault directory
-#     (where your Obsidian markdown files actually live on the server)
-#   - The stager has read-only access to that vault — it never writes to it
-#   - ./publish/content and ./publish/site are scratch dirs owned by this stack
+# Assumes you have already gotten your Obsidian vault onto the server (via
+# Self-hosted LiveSync, Syncthing, Git, or any other sync mechanism). The
+# stager mounts it read-only.
 #
-# If you also self-host Obsidian LiveSync (CouchDB + vrtmrz/livesync-bridge),
-# add those services here and bridge their filesystem into VAULT_DIR.
+# Set the variables in .env (see .env.example) before running.
 
 services:
   stager:
-    build: ./stager
+    # Pull pre-built image from GitHub Container Registry (no local build
+    # needed). To build from source instead, comment `image:` and uncomment
+    # `build:`.
+    image: ghcr.io/jagajaga/private-quartz-publish-stager:latest
+    # build: ./stager
     restart: unless-stopped
     environment:
       VAULT_DIR: /vault
       CONTENT_DIR: /content
     volumes:
-      - ${VAULT_DIR:-./vault}:/vault:ro
+      - ${VAULT_DIR:?Set VAULT_DIR in .env}:/vault:ro
       - ./publish/content:/content
 
   quartz:
-    build: ./quartz
+    image: ghcr.io/jagajaga/private-quartz-publish-quartz:latest
+    # build: ./quartz
     restart: unless-stopped
     volumes:
       - ./publish/content:/quartz/content:ro
@@ -36,3 +38,23 @@ services:
       - ./quartz/FolderSidebar.tsx:/quartz/FolderSidebar.tsx:ro
     depends_on:
       - stager
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLISH_DOMAIN: ${PUBLISH_DOMAIN:?Set PUBLISH_DOMAIN in .env}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./publish/site:/srv/site:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - quartz
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,5 +1,7 @@
 # Private Quartz Publish
 
+> ⚠️ **This plugin requires a server you run yourself.** It writes frontmatter inside Obsidian; the actual rendering and serving happens on a small docker stack (see `server-example/`). If you don't already have a VPS + domain, [Obsidian Publish](https://obsidian.md/publish) ($8/month) might be a better fit.
+
 An Obsidian plugin + reference server stack that lets you opt-in publish individual notes or whole folders from your vault to a self-hosted [Quartz](https://github.com/jackyzha0/quartz) site, with **unguessable random-slug URLs** so the public surface cannot be enumerated.
 
 ```
@@ -105,7 +107,19 @@ If you sync your vault across devices, you only need to do the install on one de
 
 ### 2. Server side
 
-See [`server-example/README.md`](./server-example/README.md). Short version:
+> **Prerequisites:** a Linux server with a public IP, Docker installed, and a domain whose A/AAAA records point at the server. If you don't already have your Obsidian vault on the server, set up [Self-hosted LiveSync](https://github.com/vrtmrz/obsidian-livesync) or any other vault sync mechanism first — this stack expects your markdown to land on disk somewhere it can read.
+
+**One-command setup:**
+
+```bash
+git clone https://github.com/jagajaga/private-quartz-publish.git
+cd private-quartz-publish/server-example
+./setup.sh
+```
+
+The wizard prompts for your vault directory and public domain, writes `.env`, pulls the pre-built images from GHCR, and brings the stack up with automatic Let's Encrypt HTTPS via the bundled Caddy.
+
+Manual setup (if you prefer to read what's happening):
 
 ```bash
 cd server-example

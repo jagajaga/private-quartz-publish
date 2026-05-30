@@ -1,0 +1,28 @@
+# Caddy configuration used when running via docker-compose.
+#
+# {$PUBLISH_DOMAIN} is interpolated from the PUBLISH_DOMAIN env var. Caddy
+# automatically obtains a Let's Encrypt certificate for it as long as the
+# domain's DNS A/AAAA records point at this server and ports 80 + 443 are
+# reachable from the internet.
+
+{$PUBLISH_DOMAIN} {
+    root * /srv/site
+    encode gzip zstd
+
+    # Quartz emits Foo.html but its internal links use /Foo, so the static
+    # file server must fall back through .html and /index.html to resolve
+    # extensionless URLs.
+    try_files {path} {path}.html {path}/index.html
+    file_server
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    handle_errors {
+        rewrite * /404.html
+        file_server
+    }
+}
