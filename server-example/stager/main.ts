@@ -70,6 +70,10 @@ interface NoteInfo {
   bodyStart: number;
   /** Vault folder this note lives in (relPath of parent, "" if at root). */
   parentFolder: string;
+  /** `folder_slug` from frontmatter (if part of a published bundle). */
+  folderSlug: string | null;
+  /** `folder_name` from frontmatter (optional display name override). */
+  folderName: string | null;
 }
 
 function extractFrontmatter(
@@ -102,9 +106,12 @@ function fallbackSlug(vaultPath: string): string {
   return basename(vaultPath).replace(/\.md$/i, "").replace(/\s+/g, "-");
 }
 
-function stripSlugFrontmatter(fmText: string): string {
+function stripPrivateFrontmatter(fmText: string): string {
+  // Strip values that should never leak to the public site.
   return fmText
     .replace(/^slug:[^\n]*\n?/m, "")
+    .replace(/^folder_slug:[^\n]*\n?/m, "")
+    .replace(/^folder_name:[^\n]*\n?/m, "")
     .replace(/\n{3,}/g, "\n\n");
 }
 
@@ -186,7 +193,7 @@ async function stageNoteCopy(
   const fmText = note.raw.slice(0, note.bodyStart);
   const body = note.raw.slice(note.bodyStart);
   const rewritten = rewriteBody(body, notes, byName, embedSlugByPath, scopePrefix);
-  const staged = stripSlugFrontmatter(fmText) + rewritten;
+  const staged = stripPrivateFrontmatter(fmText) + rewritten;
   const dst = join(CONTENT, destRel);
   await ensureDir(dirname(dst));
   await Deno.writeTextFile(dst, staged);
@@ -252,6 +259,14 @@ async function reconcile() {
       : basename(path).replace(/\.md$/i, "");
     const relPath = relative(VAULT, path).split("\\").join("/");
     const parentFolder = dirname(relPath);
+    const folderSlug =
+      typeof fm.folder_slug === "string" && fm.folder_slug.length > 0
+        ? fm.folder_slug
+        : null;
+    const folderName =
+      typeof fm.folder_name === "string" && fm.folder_name.length > 0
+        ? fm.folder_name
+        : null;
     notes.set(path, {
       vaultPath: path,
       relPath,
@@ -260,6 +275,8 @@ async function reconcile() {
       raw,
       bodyStart,
       parentFolder: parentFolder === "." ? "" : parentFolder,
+      folderSlug,
+      folderName,
     });
   }
 
@@ -282,13 +299,56 @@ async function reconcile() {
     }
   }
 
-  // ---- Pass 5: stage notes ----
-  // Index notes by their parentFolder for folder index generation.
+  // ---- Pass 5: build bundle map ----
+  // Source of truth #1 (preferred): each published note's own `folder_slug`
+  // frontmatter — set by the Obsidian plugin when the folder was published.
+  // Source of truth #2 (legacy fallback): the plugin's data.json that maps
+  // vault-folder-path → folder-slug. Kept so existing deployments still work.
+  interface Bundle {
+    slug: string;
+    name: string;
+    notes: NoteInfo[];
+  }
+  const bundles = new Map<string, Bundle>(); // folder-slug → bundle
+
+  // Index notes by their parentFolder (used by the data.json fallback).
   const notesByFolder = new Map<string, NoteInfo[]>();
   for (const [, note] of notes) {
     const arr = notesByFolder.get(note.parentFolder) ?? [];
     arr.push(note);
     notesByFolder.set(note.parentFolder, arr);
+  }
+
+  // 5a. Frontmatter-derived bundles (source of truth #1).
+  for (const [, note] of notes) {
+    if (!note.folderSlug) continue;
+    let bundle = bundles.get(note.folderSlug);
+    if (!bundle) {
+      const fallbackName = note.folderName ??
+        (basename(note.parentFolder) || note.parentFolder || note.folderSlug);
+      bundle = { slug: note.folderSlug, name: fallbackName, notes: [] };
+      bundles.set(note.folderSlug, bundle);
+    }
+    if (!bundle.notes.some((n) => n.vaultPath === note.vaultPath)) {
+      bundle.notes.push(note);
+    }
+  }
+
+  // 5b. data.json-derived bundles (legacy fallback, dedup against 5a).
+  for (const [folderPath, folderSlug] of Object.entries(folderSlugs)) {
+    const folderNotes = notesByFolder.get(folderPath) ?? [];
+    if (folderNotes.length === 0) continue;
+    let bundle = bundles.get(folderSlug);
+    if (!bundle) {
+      const folderName = basename(folderPath) || folderPath;
+      bundle = { slug: folderSlug, name: folderName, notes: [] };
+      bundles.set(folderSlug, bundle);
+    }
+    for (const note of folderNotes) {
+      if (!bundle.notes.some((n) => n.vaultPath === note.vaultPath)) {
+        bundle.notes.push(note);
+      }
+    }
   }
 
   const wanted = new Set<string>();
@@ -306,16 +366,13 @@ async function reconcile() {
     );
   }
 
-  // Folder copies + folder index pages for every published folder.
-  for (const [folderPath, folderSlug] of Object.entries(folderSlugs)) {
-    const folderNotes = notesByFolder.get(folderPath) ?? [];
-    if (folderNotes.length === 0) continue;
-    const scopePrefix = `${folderSlug}/`;
-    // Folder-scoped copy of each note in the folder.
-    for (const note of folderNotes) {
+  // Bundle copies (folder-scoped) + folder index page per bundle.
+  for (const bundle of bundles.values()) {
+    const scopePrefix = `${bundle.slug}/`;
+    for (const note of bundle.notes) {
       await stageNoteCopy(
         note,
-        `${folderSlug}/${note.slug}.md`,
+        `${bundle.slug}/${note.slug}.md`,
         scopePrefix,
         notes,
         byName,
@@ -328,13 +385,12 @@ async function reconcile() {
     // `/<folder-slug>`. Quartz v4 does not treat `<folder>/index.md` as a
     // folder root without the FolderPage emitter (which we intentionally
     // removed for privacy).
-    const folderName = basename(folderPath) || folderPath;
     const indexContent = generateFolderIndex(
-      folderName,
-      folderSlug,
-      folderNotes,
+      bundle.name,
+      bundle.slug,
+      bundle.notes,
     );
-    const indexPath = join(CONTENT, `${folderSlug}.md`);
+    const indexPath = join(CONTENT, `${bundle.slug}.md`);
     await Deno.writeTextFile(indexPath, indexContent);
     wanted.add(indexPath);
   }
@@ -383,7 +439,7 @@ async function reconcile() {
   }
 
   console.log(
-    `[stager] reconciled: notes=${notes.size} folders=${Object.keys(folderSlugs).length} embeds=${embedSlugByPath.size} removed=${removed}`,
+    `[stager] reconciled: notes=${notes.size} bundles=${bundles.size} embeds=${embedSlugByPath.size} removed=${removed}`,
   );
 }
 

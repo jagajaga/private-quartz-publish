@@ -32,6 +32,10 @@ interface QuartzPublishSettings {
   publishProperty: string
   /** Frontmatter key used to store the per-note random slug. */
   slugProperty: string
+  /** Frontmatter key used on each note that lives in a published folder bundle. */
+  folderSlugProperty: string
+  /** Frontmatter key used to override the displayed folder name. */
+  folderNameProperty: string
   /** Show a confirmation dialog before bulk folder operations. */
   confirmFolderActions: boolean
   /** Copy the URL to the clipboard after Publish / Rotate / Folder publish. */
@@ -43,6 +47,8 @@ const DEFAULT_SETTINGS: QuartzPublishSettings = {
   slugLength: 10,
   publishProperty: "publish",
   slugProperty: "slug",
+  folderSlugProperty: "folder_slug",
+  folderNameProperty: "folder_name",
   confirmFolderActions: true,
   copyUrlOnPublish: true,
 }
@@ -156,7 +162,7 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
   }
 
   addFolderMenu(menu: any, folder: TFolder) {
-    const slug = this.folders[folder.path]
+    const slug = this.getFolderSlug(folder)
     if (slug) {
       menu.addItem((item: any) => {
         item
@@ -284,6 +290,26 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
     )
   }
 
+  /**
+   * Look up the folder slug. Source of truth: any child note's frontmatter
+   * `folder_slug` value. Fallback to the locally-cached data.json map for
+   * backward compat.
+   *
+   * Storing the slug in each child note (rather than only in data.json)
+   * means the server-side stager sees it via normal vault file sync —
+   * surviving sync setups that exclude plugin data files from replication.
+   */
+  getFolderSlug(folder: TFolder): string | null {
+    const files = this.childMdFiles(folder)
+    for (const file of files) {
+      const cache = this.app.metadataCache.getFileCache(file)
+      const slug = cache?.frontmatter?.[this.settings.folderSlugProperty]
+      if (typeof slug === "string" && slug.length > 0) return slug
+    }
+    const cached = this.folders[folder.path]
+    return typeof cached === "string" && cached.length > 0 ? cached : null
+  }
+
   async publishFolder(folder: TFolder) {
     const files = this.childMdFiles(folder)
     if (files.length === 0) {
@@ -299,6 +325,7 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
       )
       if (!proceed) return
     }
+    const folderSlug = this.generateSlug()
     for (const file of files) {
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         fm[this.settings.publishProperty] = true
@@ -308,9 +335,12 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
         ) {
           fm[this.settings.slugProperty] = this.generateSlug()
         }
+        fm[this.settings.folderSlugProperty] = folderSlug
+        fm[this.settings.folderNameProperty] = folder.name
       })
     }
-    const folderSlug = this.generateSlug()
+    // Also cache in data.json for fast right-click responsiveness on this
+    // device. The frontmatter copy is the durable source of truth.
     this.folders[folder.path] = folderSlug
     await this.saveStored()
     await this.announce(
@@ -330,6 +360,8 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
     for (const file of files) {
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         delete fm[this.settings.publishProperty]
+        delete fm[this.settings.folderSlugProperty]
+        delete fm[this.settings.folderNameProperty]
       })
     }
     delete this.folders[folder.path]
@@ -338,7 +370,7 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
   }
 
   async copyFolderUrl(folder: TFolder) {
-    const slug = this.folders[folder.path]
+    const slug = this.getFolderSlug(folder)
     if (!slug) {
       new Notice("Folder is not published.")
       return

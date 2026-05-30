@@ -30,6 +30,7 @@ Obsidian Publish costs $8/month and pins you to their domain. Quartz lets you se
 - **Wikilink leak protection.** Wikilinks to *unpublished* notes are stripped to plain text before staging — the name of an unpublished note never reaches the public HTML.
 - **Embed leak protection.** Images / PDFs are renamed to a SHA-256 content hash so they can't be enumerated by original filename.
 - **Belt-and-suspenders filter.** Even if a stray file somehow lands in the build directory, Quartz's `ExplicitPublish` filter drops it at render time.
+- **Sync-resilient folder state.** Folder publishes write `folder_slug` into each child note's frontmatter, not just into the plugin's `data.json`. So the server-side stager works even if your vault sync mechanism (LiveSync, etc.) excludes plugin data files from replication.
 
 ## Right-click UX
 
