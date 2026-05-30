@@ -115,6 +115,27 @@ function stripPrivateFrontmatter(fmText: string): string {
     .replace(/\n{3,}/g, "\n\n");
 }
 
+/**
+ * Ensure the staged frontmatter has a `title:` so Quartz does not fall back
+ * to the basename (which is the random slug). If the source already declares
+ * a title we leave it alone; otherwise we inject one derived from the
+ * original vault filename.
+ */
+function ensureTitleFrontmatter(fmText: string, title: string): string {
+  if (/^title:\s*\S/m.test(fmText)) return fmText;
+  const safe = title
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"');
+  if (fmText.startsWith("---\n")) {
+    return `---\ntitle: "${safe}"\n` + fmText.slice(4);
+  }
+  if (fmText.startsWith("---\r\n")) {
+    return `---\r\ntitle: "${safe}"\r\n` + fmText.slice(5);
+  }
+  // No frontmatter at all — synthesize one.
+  return `---\ntitle: "${safe}"\n---\n` + fmText;
+}
+
 function resolveByName(
   name: string,
   byName: Map<string, string>,
@@ -193,7 +214,9 @@ async function stageNoteCopy(
   const fmText = note.raw.slice(0, note.bodyStart);
   const body = note.raw.slice(note.bodyStart);
   const rewritten = rewriteBody(body, notes, byName, embedSlugByPath, scopePrefix);
-  const staged = stripPrivateFrontmatter(fmText) + rewritten;
+  const cleaned = stripPrivateFrontmatter(fmText);
+  const withTitle = ensureTitleFrontmatter(cleaned, note.title);
+  const staged = withTitle + rewritten;
   const dst = join(CONTENT, destRel);
   await ensureDir(dirname(dst));
   await Deno.writeTextFile(dst, staged);
@@ -212,8 +235,10 @@ function generateFolderIndex(
     .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }))
     .map((n) => `- [${n.title}](/${folderSlug}/${n.slug})`)
     .join("\n");
+  // Quoted title is YAML-safe even when the folder name contains `:`, `#`, etc.
   // `publish: true` is required so the ExplicitPublish filter doesn't drop it.
-  return `---\npublish: true\ntitle: ${folderName}\n---\n\n# ${folderName}\n\n${list}\n`;
+  const safeName = folderName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `---\npublish: true\ntitle: "${safeName}"\n---\n\n# ${folderName}\n\n${list}\n`;
 }
 
 async function reconcile() {
