@@ -1,0 +1,38 @@
+# Reference docker-compose for the server-side stack.
+#
+# Two services that you compose with whatever sync mechanism you use to get
+# your Obsidian vault onto the server:
+#   - stager: watches the vault, mirrors `publish: true` notes into ./content
+#   - quartz: builds ./content into ./site, which your reverse proxy serves
+#
+# Assumes:
+#   - VAULT_DIR is the absolute or relative path to your vault directory
+#     (where your Obsidian markdown files actually live on the server)
+#   - The stager has read-only access to that vault — it never writes to it
+#   - ./publish/content and ./publish/site are scratch dirs owned by this stack
+#
+# If you also self-host Obsidian LiveSync (CouchDB + vrtmrz/livesync-bridge),
+# add those services here and bridge their filesystem into VAULT_DIR.
+
+services:
+  stager:
+    build: ./stager
+    restart: unless-stopped
+    environment:
+      VAULT_DIR: /vault
+      CONTENT_DIR: /content
+    volumes:
+      - ${VAULT_DIR:-./vault}:/vault:ro
+      - ./publish/content:/content
+
+  quartz:
+    build: ./quartz
+    restart: unless-stopped
+    volumes:
+      - ./publish/content:/quartz/content:ro
+      - ./publish/site:/site
+      - ./quartz/quartz.config.ts:/quartz/quartz.config.ts:ro
+      - ./quartz/quartz.layout.ts:/quartz/quartz.layout.ts:ro
+      - ./quartz/FolderSidebar.tsx:/quartz/FolderSidebar.tsx:ro
+    depends_on:
+      - stager

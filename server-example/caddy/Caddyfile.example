@@ -1,0 +1,30 @@
+# Reverse-proxy example for the Quartz site.
+#
+# Replace notes.example.com with your domain.
+# Replace /path/to/publish/site with the absolute path to the `site/` dir
+# that Quartz writes into (mounted as ./publish/site in docker-compose).
+#
+# try_files is critical: Quartz emits Foo.html but its internal links use
+# /Foo, so the static file server must fall back through .html and
+# /index.html to resolve extensionless URLs.
+#
+# handle_errors rewrites 404s to Quartz's branded 404 page.
+
+notes.example.com {
+    root * /path/to/publish/site
+    encode gzip zstd
+
+    try_files {path} {path}.html {path}/index.html
+    file_server
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    handle_errors {
+        rewrite * /404.html
+        file_server
+    }
+}
