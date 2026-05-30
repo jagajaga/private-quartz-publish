@@ -422,15 +422,29 @@ async function reconcile() {
       }
     }
     for (const note of bundle.notes) {
-      // Prefer the explicit folder_path the plugin wrote. Fallback for
-      // legacy bundles: compute from the note's vault relative path minus
-      // the bundle root. Last resort: use the basename without .md so the
-      // sidebar at least renders the note as a flat leaf.
+      // Prefer the explicit folder_path the plugin wrote. Three fallbacks
+      // so older plugin versions still produce a hierarchical sidebar:
+      //   1. If data.json mapped a vault folder to this bundle slug, use
+      //      `note.relPath - dataJsonBundleRoot`.
+      //   2. If frontmatter carries folder_name (older plugins did write
+      //      this), locate that folder name as a path segment in the
+      //      note's vault path and take everything after it.
+      //   3. Last resort: basename only — the note renders flat as a leaf.
       let folderPath = note.folderPath;
       if (!folderPath && bundleRoot && note.relPath.startsWith(bundleRoot + "/")) {
         folderPath = note.relPath
           .slice(bundleRoot.length + 1)
           .replace(/\.md$/i, "");
+      }
+      if (!folderPath && note.folderName) {
+        const segs = note.relPath.split("/");
+        const idx = segs.indexOf(note.folderName);
+        if (idx >= 0) {
+          folderPath = segs
+            .slice(idx + 1)
+            .join("/")
+            .replace(/\.md$/i, "");
+        }
       }
       if (!folderPath) {
         folderPath = basename(note.relPath).replace(/\.md$/i, "");

@@ -1,7 +1,7 @@
 {
   "id": "private-quartz-publish",
   "name": "Private Quartz Publish",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "minAppVersion": "1.4.0",
   "description": "Opt-in publish individual notes or whole folders from Obsidian to a self-hosted Quartz site. Each URL is an unguessable random slug; sharing a file link reveals only that file, sharing a folder link reveals only its bundled notes.",
   "author": "Arseniy Seroka",
