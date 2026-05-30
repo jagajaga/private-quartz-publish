@@ -25,7 +25,7 @@ Obsidian Publish costs $8/month and pins you to their domain. Quartz lets you se
 - **Cryptographically random slugs.** 10-char base62 ≈ 60 bits of entropy; collisions effectively impossible.
 - **Two opt-in shapes.**
   - Single note: random URL, standalone page, no navigation to anything else.
-  - Folder bundle: every direct `.md` child published, plus a folder landing page with a sidebar listing the bundle. Sidebar persists as you click through.
+  - Folder bundle: every `.md` descendant published (recursive, including subfolders), plus a folder landing page with a sidebar listing every note. Sidebar persists as you click through. Re-publishing reuses the existing folder slug, so previously shared links keep working.
 - **URL-editing visitor cannot enumerate.** No sitemap, no RSS, no folder index pages, no tag pages, no `/` index, no search.
 - **Wikilink leak protection.** Wikilinks to *unpublished* notes are stripped to plain text before staging — the name of an unpublished note never reaches the public HTML.
 - **Embed leak protection.** Images / PDFs are renamed to a SHA-256 content hash so they can't be enumerated by original filename.
@@ -47,8 +47,8 @@ Obsidian Publish costs $8/month and pins you to their domain. Quartz lets you se
 
 | Action | What it does |
 |---|---|
-| Publish folder | Bulk-publishes every direct `.md` child (subfolders NOT included). Generates a folder slug. Copies the folder URL. |
-| Unpublish folder | Removes the folder slug AND unpublishes every direct child. |
+| Publish folder | Bulk-publishes every `.md` descendant (recursive, includes subfolders). Reuses an existing folder slug if any descendant already has one, otherwise mints a new one. Copies the folder URL. |
+| Unpublish folder | Removes the folder slug AND unpublishes every `.md` descendant (recursive). |
 | Copy folder URL | For already-published folders. |
 
 Also available via Command Palette: `Toggle publish on active note`, `Copy public URL of active note`, `Rotate public URL of active note`.

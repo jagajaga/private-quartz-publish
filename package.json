@@ -1,6 +1,6 @@
 {
   "name": "private-quartz-publish",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Obsidian plugin: opt-in publish notes and folders to a self-hosted Quartz site with unguessable random-slug URLs.",
   "main": "main.js",
   "scripts": {

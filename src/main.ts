@@ -284,23 +284,36 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
 
   // ─── Folder operations ──────────────────────────────────────────────────
 
-  childMdFiles(folder: TFolder): TFile[] {
-    return folder.children.filter(
-      (c): c is TFile => c instanceof TFile && c.extension === "md",
-    )
+  /**
+   * Every .md file beneath `folder`, recursive across all subfolders.
+   * Publishing a folder bundles its entire subtree under a single folder URL.
+   */
+  allMdFilesUnderFolder(folder: TFolder): TFile[] {
+    const out: TFile[] = []
+    const walk = (f: TFolder) => {
+      for (const child of f.children) {
+        if (child instanceof TFile && child.extension === "md") {
+          out.push(child)
+        } else if (child instanceof TFolder) {
+          walk(child)
+        }
+      }
+    }
+    walk(folder)
+    return out
   }
 
   /**
-   * Look up the folder slug. Source of truth: any child note's frontmatter
-   * `folder_slug` value. Fallback to the locally-cached data.json map for
-   * backward compat.
+   * Look up the folder slug. Source of truth: any descendant note's
+   * frontmatter `folder_slug` value (recursive). Fallback to the locally-
+   * cached data.json map for backward compat.
    *
-   * Storing the slug in each child note (rather than only in data.json)
-   * means the server-side stager sees it via normal vault file sync —
-   * surviving sync setups that exclude plugin data files from replication.
+   * Storing the slug in each note (rather than only in data.json) means
+   * the server-side stager sees it via normal vault file sync — surviving
+   * sync setups that exclude plugin data files from replication.
    */
   getFolderSlug(folder: TFolder): string | null {
-    const files = this.childMdFiles(folder)
+    const files = this.allMdFilesUnderFolder(folder)
     for (const file of files) {
       const cache = this.app.metadataCache.getFileCache(file)
       const slug = cache?.frontmatter?.[this.settings.folderSlugProperty]
@@ -311,21 +324,24 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
   }
 
   async publishFolder(folder: TFolder) {
-    const files = this.childMdFiles(folder)
+    const files = this.allMdFilesUnderFolder(folder)
     if (files.length === 0) {
-      new Notice(`No .md files directly in "${folder.name}".`)
+      new Notice(`No .md files under "${folder.name}".`)
       return
     }
     if (this.settings.confirmFolderActions) {
       const proceed = window.confirm(
-        `Publish folder "${folder.name}" and ALL ${files.length} note(s) directly inside it?\n\n` +
+        `Publish folder "${folder.name}" and ALL ${files.length} note(s) inside it ` +
+          `(including subfolders)?\n\n` +
           `Each note gets its own random URL.\n` +
-          `The folder gets a separate URL that shows a sidebar of the notes.\n` +
-          `Subfolders are NOT included — publish them separately.`,
+          `The folder gets a separate URL that shows a sidebar of all notes.\n` +
+          `Existing folder slug (if any) is reused so shared links stay stable.`,
       )
       if (!proceed) return
     }
-    const folderSlug = this.generateSlug()
+    // Reuse any existing folder slug so re-publishing doesn't break previously
+    // shared URLs. Otherwise mint a fresh one.
+    const folderSlug = this.getFolderSlug(folder) ?? this.generateSlug()
     for (const file of files) {
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         fm[this.settings.publishProperty] = true
@@ -339,8 +355,8 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
         fm[this.settings.folderNameProperty] = folder.name
       })
     }
-    // Also cache in data.json for fast right-click responsiveness on this
-    // device. The frontmatter copy is the durable source of truth.
+    // Cache in data.json for fast right-click responsiveness on this device.
+    // The frontmatter copy is the durable, sync-safe source of truth.
     this.folders[folder.path] = folderSlug
     await this.saveStored()
     await this.announce(
@@ -350,10 +366,11 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
   }
 
   async unpublishFolder(folder: TFolder) {
-    const files = this.childMdFiles(folder)
+    const files = this.allMdFilesUnderFolder(folder)
     if (this.settings.confirmFolderActions) {
       const proceed = window.confirm(
-        `Unpublish folder "${folder.name}" AND all ${files.length} note(s) directly inside it?`,
+        `Unpublish folder "${folder.name}" AND all ${files.length} note(s) inside it ` +
+          `(including subfolders)?`,
       )
       if (!proceed) return
     }
