@@ -36,6 +36,8 @@ interface QuartzPublishSettings {
   folderSlugProperty: string
   /** Frontmatter key used to override the displayed folder name. */
   folderNameProperty: string
+  /** Frontmatter key used to record each note's path within its folder bundle. */
+  folderPathProperty: string
   /** Show a confirmation dialog before bulk folder operations. */
   confirmFolderActions: boolean
   /** Copy the URL to the clipboard after Publish / Rotate / Folder publish. */
@@ -49,6 +51,7 @@ const DEFAULT_SETTINGS: QuartzPublishSettings = {
   slugProperty: "slug",
   folderSlugProperty: "folder_slug",
   folderNameProperty: "folder_name",
+  folderPathProperty: "folder_path",
   confirmFolderActions: true,
   copyUrlOnPublish: true,
 }
@@ -342,7 +345,20 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
     // Reuse any existing folder slug so re-publishing doesn't break previously
     // shared URLs. Otherwise mint a fresh one.
     const folderSlug = this.getFolderSlug(folder) ?? this.generateSlug()
+    // Base path used to compute each note's location within the bundle.
+    // For a vault-root folder, folder.path is the folder name; for a nested
+    // folder, it's the full vault path. We strip this prefix from each
+    // descendant's path to get its in-bundle position.
+    const basePathPrefix = folder.path === "" ? "" : folder.path + "/"
     for (const file of files) {
+      // Path within the bundle (e.g. "2025/note-a"), no .md extension.
+      let folderPath = file.path
+      if (basePathPrefix && folderPath.startsWith(basePathPrefix)) {
+        folderPath = folderPath.slice(basePathPrefix.length)
+      }
+      if (folderPath.toLowerCase().endsWith(".md")) {
+        folderPath = folderPath.slice(0, -3)
+      }
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         fm[this.settings.publishProperty] = true
         if (
@@ -353,6 +369,7 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
         }
         fm[this.settings.folderSlugProperty] = folderSlug
         fm[this.settings.folderNameProperty] = folder.name
+        fm[this.settings.folderPathProperty] = folderPath
       })
     }
     // Cache in data.json for fast right-click responsiveness on this device.
@@ -379,6 +396,7 @@ export default class PrivateQuartzPublishPlugin extends Plugin {
         delete fm[this.settings.publishProperty]
         delete fm[this.settings.folderSlugProperty]
         delete fm[this.settings.folderNameProperty]
+        delete fm[this.settings.folderPathProperty]
       })
     }
     delete this.folders[folder.path]

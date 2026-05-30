@@ -74,6 +74,8 @@ interface NoteInfo {
   folderSlug: string | null;
   /** `folder_name` from frontmatter (optional display name override). */
   folderName: string | null;
+  /** `folder_path` from frontmatter (relative path within its bundle). */
+  folderPath: string | null;
 }
 
 function extractFrontmatter(
@@ -116,24 +118,25 @@ function stripPrivateFrontmatter(fmText: string): string {
 }
 
 /**
- * Ensure the staged frontmatter has a `title:` so Quartz does not fall back
- * to the basename (which is the random slug). If the source already declares
- * a title we leave it alone; otherwise we inject one derived from the
- * original vault filename.
+ * Inject a `key: "value"` line into the frontmatter unless that key is
+ * already declared. Used to ensure Quartz sees a title, folder_path, etc.,
+ * without clobbering values the user explicitly set.
  */
-function ensureTitleFrontmatter(fmText: string, title: string): string {
-  if (/^title:\s*\S/m.test(fmText)) return fmText;
-  const safe = title
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"');
+function ensureFrontmatterKey(
+  fmText: string,
+  key: string,
+  value: string,
+): string {
+  const re = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s*\\S`, "m");
+  if (re.test(fmText)) return fmText;
+  const safe = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   if (fmText.startsWith("---\n")) {
-    return `---\ntitle: "${safe}"\n` + fmText.slice(4);
+    return `---\n${key}: "${safe}"\n` + fmText.slice(4);
   }
   if (fmText.startsWith("---\r\n")) {
-    return `---\r\ntitle: "${safe}"\r\n` + fmText.slice(5);
+    return `---\r\n${key}: "${safe}"\r\n` + fmText.slice(5);
   }
-  // No frontmatter at all — synthesize one.
-  return `---\ntitle: "${safe}"\n---\n` + fmText;
+  return `---\n${key}: "${safe}"\n---\n` + fmText;
 }
 
 function resolveByName(
@@ -210,13 +213,22 @@ async function stageNoteCopy(
   byName: Map<string, string>,
   embedSlugByPath: Map<string, string>,
   wanted: Set<string>,
+  /**
+   * When set, the staged copy gets a `folder_path: "<value>"` line so the
+   * FolderSidebar component can build a hierarchical tree. Pass `null` for
+   * standalone copies (no sidebar is rendered anyway).
+   */
+  bundleFolderPath: string | null = null,
 ) {
   const fmText = note.raw.slice(0, note.bodyStart);
   const body = note.raw.slice(note.bodyStart);
   const rewritten = rewriteBody(body, notes, byName, embedSlugByPath, scopePrefix);
-  const cleaned = stripPrivateFrontmatter(fmText);
-  const withTitle = ensureTitleFrontmatter(cleaned, note.title);
-  const staged = withTitle + rewritten;
+  let staged = stripPrivateFrontmatter(fmText);
+  staged = ensureFrontmatterKey(staged, "title", note.title);
+  if (bundleFolderPath) {
+    staged = ensureFrontmatterKey(staged, "folder_path", bundleFolderPath);
+  }
+  staged = staged + rewritten;
   const dst = join(CONTENT, destRel);
   await ensureDir(dirname(dst));
   await Deno.writeTextFile(dst, staged);
@@ -292,6 +304,10 @@ async function reconcile() {
       typeof fm.folder_name === "string" && fm.folder_name.length > 0
         ? fm.folder_name
         : null;
+    const folderPath =
+      typeof fm.folder_path === "string" && fm.folder_path.length > 0
+        ? fm.folder_path
+        : null;
     notes.set(path, {
       vaultPath: path,
       relPath,
@@ -302,6 +318,7 @@ async function reconcile() {
       parentFolder: parentFolder === "." ? "" : parentFolder,
       folderSlug,
       folderName,
+      folderPath,
     });
   }
 
@@ -394,7 +411,30 @@ async function reconcile() {
   // Bundle copies (folder-scoped) + folder index page per bundle.
   for (const bundle of bundles.values()) {
     const scopePrefix = `${bundle.slug}/`;
+    // For legacy data.json-derived bundles (no folder_path in frontmatter),
+    // recover the bundle's vault root so we can compute a folder_path for
+    // each note. Reverse-lookup the data.json mapping.
+    let bundleRoot: string | null = null;
+    for (const [vp, fs] of Object.entries(folderSlugs)) {
+      if (fs === bundle.slug) {
+        bundleRoot = vp;
+        break;
+      }
+    }
     for (const note of bundle.notes) {
+      // Prefer the explicit folder_path the plugin wrote. Fallback for
+      // legacy bundles: compute from the note's vault relative path minus
+      // the bundle root. Last resort: use the basename without .md so the
+      // sidebar at least renders the note as a flat leaf.
+      let folderPath = note.folderPath;
+      if (!folderPath && bundleRoot && note.relPath.startsWith(bundleRoot + "/")) {
+        folderPath = note.relPath
+          .slice(bundleRoot.length + 1)
+          .replace(/\.md$/i, "");
+      }
+      if (!folderPath) {
+        folderPath = basename(note.relPath).replace(/\.md$/i, "");
+      }
       await stageNoteCopy(
         note,
         `${bundle.slug}/${note.slug}.md`,
@@ -403,6 +443,7 @@ async function reconcile() {
         byName,
         embedSlugByPath,
         wanted,
+        folderPath,
       );
     }
     // Folder index page — emitted at content root as `<folder-slug>.md` so
