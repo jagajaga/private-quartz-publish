@@ -1,0 +1,17 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Build output (committed for release tags; ignored otherwise — generated on demand)
+# Uncomment the next line if you prefer NOT to commit main.js:
+# main.js
+
+# Editor + OS
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Local environment
+.env
+.env.local
