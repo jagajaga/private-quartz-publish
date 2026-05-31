@@ -15,12 +15,35 @@ set -e
 SCRATCH=/tmp/quartz-out
 mkdir -p /site "$SCRATCH"
 
+# Post-process: add loading="lazy" to <img> / <video> / <audio> tags that
+# don't already have it. Quartz's HTML pipeline strips the attribute even
+# when the stager emits raw HTML with it set, so we re-add here.
+postprocess_lazy() {
+  node -e '
+    const fs = require("fs");
+    const path = require("path");
+    function walk(dir) {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) { walk(p); continue; }
+        if (!e.name.endsWith(".html")) continue;
+        let s = fs.readFileSync(p, "utf8");
+        const orig = s;
+        s = s.replace(/<(img|video|audio)(?![^>]*\bloading=)/g, "<$1 loading=\"lazy\"");
+        if (s !== orig) fs.writeFileSync(p, s);
+      }
+    }
+    walk("'"$SCRATCH"'");
+  ' 2>/dev/null || true
+}
+
 # ── Background: rsync SCRATCH → /site whenever Quartz writes ──
 (
   while true; do
     inotifywait -r -q -e close_write,create,delete,moved_to "$SCRATCH" --timeout 120 2>/dev/null || true
     # tiny debounce so a batch of writes becomes one rsync
     sleep 0.3
+    postprocess_lazy
     rsync -a --delete "$SCRATCH"/ /site/ 2>/dev/null || true
   done
 ) &
