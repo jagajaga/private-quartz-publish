@@ -15,9 +15,15 @@ set -e
 SCRATCH=/tmp/quartz-out
 mkdir -p /site "$SCRATCH"
 
-# Post-process: add loading="lazy" to <img> / <video> / <audio> tags that
-# don't already have it. Quartz's HTML pipeline strips the attribute even
-# when the stager emits raw HTML with it set, so we re-add here.
+# Post-process: enforce browser-side lazy behavior on media tags. Quartz's
+# HTML pipeline strips these attributes even when emitted by the stager, so
+# we re-inject here after Quartz writes and before the rsync to /site.
+#
+#   loading="lazy"  — defers fetch until the element is near the viewport
+#                     (works on <img>; ignored on <video>/<audio> but harmless)
+#   preload="none"  — video/audio: don't fetch the file until the user
+#                     presses play. (Default would fetch metadata + a
+#                     chunk; "none" suppresses that.)
 postprocess_lazy() {
   node -e '
     const fs = require("fs");
@@ -30,6 +36,7 @@ postprocess_lazy() {
         let s = fs.readFileSync(p, "utf8");
         const orig = s;
         s = s.replace(/<(img|video|audio)(?![^>]*\bloading=)/g, "<$1 loading=\"lazy\"");
+        s = s.replace(/<(video|audio)(?![^>]*\bpreload=)/g, "<$1 preload=\"none\"");
         if (s !== orig) fs.writeFileSync(p, s);
       }
     }

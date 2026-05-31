@@ -67,6 +67,20 @@ const AUDIO_EXT_RE = /\.(mp3|wav|ogg|m4a|opus|aac|flac)(?:[?#].*)?$/i;
 function htmlEscape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+function mediaHtml(url: string, alt: string): string | null {
+  const safeUrl = htmlEscape(url);
+  const safeAlt = htmlEscape(alt);
+  if (IMG_EXT_RE.test(url)) {
+    return `<img class="inline-media" src="${safeUrl}" alt="${safeAlt}" />`;
+  }
+  if (VIDEO_EXT_RE.test(url)) {
+    return `<video class="inline-media" src="${safeUrl}" controls></video>`;
+  }
+  if (AUDIO_EXT_RE.test(url)) {
+    return `<audio class="inline-media" src="${safeUrl}" controls></audio>`;
+  }
+  return null;
+}
 
 interface NoteInfo {
   /** Absolute vault path. */
@@ -184,25 +198,28 @@ function rewriteBody(
 ): string {
   let out = body;
 
-  // First pass: convert plain markdown links to media files into raw HTML
-  // so the media renders inline. Quartz/OFM treats `![](https://...)` as an
-  // external link (with icon), not as media; raw HTML bypasses that.
+  // Convert media references to inline raw HTML so they render as
+  // <img>/<video>/<audio> on the published page. Three accepted shapes:
   //
-  // Note: Quartz's HTML sanitizer strips inline `style=` and `loading=` attrs.
-  // The .inline-media class lets the Quartz layout apply width/margin via CSS.
-  out = out.replaceAll(LINK_RE_MD, (_full, text, url) => {
-    const safeUrl = htmlEscape(url);
-    const safeAlt = htmlEscape(text);
-    if (IMG_EXT_RE.test(url)) {
-      return `<img class="inline-media" src="${safeUrl}" alt="${safeAlt}" />`;
+  //   [text](url.jpg)        plain link, no leading !
+  //   ![alt](url.jpg)        markdown embed, leading !
+  //
+  // Both render inline. For `![alt](LOCAL.jpg)`, the existing EMBED_RE_MD
+  // pipeline below still handles local files (with content-hash naming).
+  // Here we only catch EXTERNAL URLs in embed syntax — Quartz/OFM
+  // otherwise renders external `![](url)` as a clickable link.
+  out = out.replaceAll(LINK_RE_MD, (full, text, url) => {
+    const html = mediaHtml(url, text);
+    return html ?? full;
+  });
+  out = out.replaceAll(EMBED_RE_MD, (full, alt, ref) => {
+    if (/^https?:\/\//.test(ref)) {
+      const html = mediaHtml(ref, alt);
+      if (html) return html;
+      return full;
     }
-    if (VIDEO_EXT_RE.test(url)) {
-      return `<video class="inline-media" src="${safeUrl}" controls></video>`;
-    }
-    if (AUDIO_EXT_RE.test(url)) {
-      return `<audio class="inline-media" src="${safeUrl}" controls></audio>`;
-    }
-    return _full;
+    // local path — fall through to the existing local-file rewriter below
+    return full;
   });
 
   out = out.replaceAll(EMBED_RE_WIKI, (full, name, alias) => {
