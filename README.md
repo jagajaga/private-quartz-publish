@@ -4,6 +4,10 @@
 
 An Obsidian plugin + reference server stack that lets you opt-in publish individual notes or whole folders from your vault to a self-hosted [Quartz](https://github.com/jackyzha0/quartz) site, with **unguessable random-slug URLs** so the public surface cannot be enumerated.
 
+![A published folder bundle with a hierarchical sidebar showing nested subfolders; the current note "Florence" is highlighted inside Europe → Italy.](./docs/screenshots/folder-bundle.png)
+
+*Above: a published folder bundle. The sidebar shows the entire folder structure (Asia/Japan, Europe/Italy/Portugal, etc.) and the currently-open note is highlighted in its proper position. Folder URLs render this sidebar; direct file URLs render the note alone.*
+
 ```
 Right-click a note     →  /aT3kP9wQ2x                       standalone, no sidebar
 Right-click a folder   →  /xZk2a9p4Mc                       landing page + sidebar of bundled notes
