@@ -137,6 +137,25 @@ const FolderSidebar: QuartzComponent = (props: QuartzComponentProps) => {
 }
 
 FolderSidebar.css = `
+/* Inline media (added by stager when converting [text](url.jpg) → <img>).
+   Quartz's HTML sanitizer drops inline style attrs, so the constraint is
+   here. Applies to images, video, audio inside article content. */
+article .inline-media,
+.center .inline-media {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0.5em 0;
+}
+article video.inline-media,
+.center video.inline-media {
+  background: #000;
+}
+article audio.inline-media,
+.center audio.inline-media {
+  width: 100%;
+}
+
 .folder-sidebar {
   font-size: 0.95em;
   padding: 0.5em 0;

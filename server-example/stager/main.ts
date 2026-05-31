@@ -54,6 +54,19 @@ const SKIP_DIRS = [/[\/\\]\.obsidian([\/\\]|$)/, /[\/\\]\.trash([\/\\]|$)/];
 const EMBED_RE_WIKI = /!\[\[([^\]|#]+)(?:[|#]([^\]]*))?\]\]/g;
 const EMBED_RE_MD = /!\[([^\]]*)\]\(([^)]+)\)/g;
 const LINK_RE_WIKI = /(?<!!)\[\[([^\]|#]+)(?:[|#]([^\]]*))?\]\]/g;
+// Plain markdown link `[text](url)` (not preceded by `!`). We convert any
+// such link whose target is a media file into inline raw HTML so the
+// published page shows the media directly instead of a clickable text link.
+// Raw HTML is used (rather than `![]()` embed syntax) because Quartz treats
+// external URLs in embed syntax as external links with an icon, not as
+// images/videos. Raw HTML survives Quartz's markdown pipeline as-is.
+const LINK_RE_MD = /(?<!!)\[([^\]]*)\]\(([^)\s]+)\)/g;
+const IMG_EXT_RE = /\.(jpg|jpeg|png|gif|webp|svg|avif)(?:[?#].*)?$/i;
+const VIDEO_EXT_RE = /\.(mp4|webm|mov|m4v|ogv)(?:[?#].*)?$/i;
+const AUDIO_EXT_RE = /\.(mp3|wav|ogg|m4a|opus|aac|flac)(?:[?#].*)?$/i;
+function htmlEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 interface NoteInfo {
   /** Absolute vault path. */
@@ -170,6 +183,27 @@ function rewriteBody(
   scopePrefix: string, // "" for standalone copies, "<folder-slug>/" for folder copies
 ): string {
   let out = body;
+
+  // First pass: convert plain markdown links to media files into raw HTML
+  // so the media renders inline. Quartz/OFM treats `![](https://...)` as an
+  // external link (with icon), not as media; raw HTML bypasses that.
+  //
+  // Note: Quartz's HTML sanitizer strips inline `style=` and `loading=` attrs.
+  // The .inline-media class lets the Quartz layout apply width/margin via CSS.
+  out = out.replaceAll(LINK_RE_MD, (_full, text, url) => {
+    const safeUrl = htmlEscape(url);
+    const safeAlt = htmlEscape(text);
+    if (IMG_EXT_RE.test(url)) {
+      return `<img class="inline-media" src="${safeUrl}" alt="${safeAlt}" />`;
+    }
+    if (VIDEO_EXT_RE.test(url)) {
+      return `<video class="inline-media" src="${safeUrl}" controls></video>`;
+    }
+    if (AUDIO_EXT_RE.test(url)) {
+      return `<audio class="inline-media" src="${safeUrl}" controls></audio>`;
+    }
+    return _full;
+  });
 
   out = out.replaceAll(EMBED_RE_WIKI, (full, name, alias) => {
     const target = resolveByName(name, byName);
