@@ -10,6 +10,10 @@ RUN git clone --depth 1 --branch v4.5.2 https://github.com/jackyzha0/quartz.git 
     npm ci
 
 COPY entrypoint.sh /entrypoint.sh
+# Floating in-page / folder-scoped find widget; re-copied into the output
+# every postprocess pass (entrypoint.sh), so a Quartz rebuild can never strand
+# a stale version.
+COPY pf-find.js /pf-find.js
 RUN chmod +x /entrypoint.sh
 
 CMD ["/entrypoint.sh"]

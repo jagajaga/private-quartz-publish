@@ -304,6 +304,58 @@ function generateFolderIndex(
   return `---\npublish: true\ntitle: "${safeName}"\n---\n\n# ${folderName}\n\n${list}\n`;
 }
 
+/**
+ * Strip markdown to plain text for the folder search index snippet. We only
+ * need approximate readability — the browser does substring matching, not
+ * tokenized search — so this is intentionally conservative (no AST parse).
+ */
+function plainText(md: string, limit = 400): string {
+  let s = md;
+  // Drop fenced code blocks entirely (noise + can be huge in tech notes).
+  s = s.replace(/```[\s\S]*?```/g, " ");
+  // Strip HTML tags (the stager emits raw <img>/<video>/<audio> for media).
+  s = s.replace(/<[^>]+>/g, " ");
+  // Image embeds: `![alt](url)` → alt.
+  s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
+  // Wiki embeds: `![[file]]` → "" (the target isn't meaningful to a reader).
+  s = s.replace(/!\[\[[^\]]*\]\]/g, " ");
+  // Links: `[text](url)` → text.  `[[wiki|alias]]` → alias or wiki.
+  s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  s = s.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2");
+  s = s.replace(/\[\[([^\]]+)\]\]/g, "$1");
+  // Inline formatting markers.
+  s = s.replace(/[*_~`>#]+/g, " ");
+  // Collapse whitespace.
+  s = s.replace(/\s+/g, " ").trim();
+  if (s.length <= limit) return s;
+  // Cut at a word boundary near the limit if possible.
+  const cut = s.slice(0, limit);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > limit - 80 ? cut.slice(0, lastSpace) : cut).trimEnd() + "…";
+}
+
+/**
+ * Per-bundle search index consumed by pf-find.js. Lives at
+ *   /<bundle.slug>/_search.json
+ * Each entry is `{ slug, title, snippet }` — slug is the file's slug within
+ * the bundle (so the link is `/<bundle.slug>/<slug>`). The snippet is plain-
+ * text from the body so the browser-side substring match returns useful hits
+ * even when the title doesn't contain the query.
+ */
+function generateFolderSearchIndex(
+  bundleNotes: NoteInfo[],
+): string {
+  const entries = bundleNotes
+    .slice()
+    .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }))
+    .map((n) => ({
+      slug: n.slug,
+      title: n.title,
+      snippet: plainText(n.raw.slice(n.bodyStart)),
+    }));
+  return JSON.stringify(entries);
+}
+
 async function reconcile() {
   await ensureDir(CONTENT);
 
@@ -524,6 +576,14 @@ async function reconcile() {
     const indexPath = join(CONTENT, `${bundle.slug}.md`);
     await Deno.writeTextFile(indexPath, indexContent);
     wanted.add(indexPath);
+
+    // Folder search index — pf-find.js fetches this lazily when the user
+    // opens the "this folder" tab. Lives under the bundle dir so Quartz/
+    // Caddy serves it at the same origin as the bundle pages.
+    const searchPath = join(CONTENT, bundle.slug, "_search.json");
+    await ensureDir(dirname(searchPath));
+    await Deno.writeTextFile(searchPath, generateFolderSearchIndex(bundle.notes));
+    wanted.add(searchPath);
   }
 
   // ---- Pass 6: stage embeds (always at content root, flat) ----
